@@ -1,25 +1,214 @@
 ---
-title: "Reproducible Research: Peer Assessment 1"
-output: 
-  html_document:
-    keep_md: true
+title: "Reproducible Research Project 1"
+author: "Joakim Kalvenes"
+date: "December 12, 2017"
+output: html_document
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Analysis of Activity Logs Produced by Personal Activity Monitoring Devices
 
-## Loading and preprocessing the data
+Personal, portable devices, such as smart watches and fitness trackers, can collect large volumes of
+activity data. In this study, we will analyze a set of step counts and highlight how step count for an
+individual varies by time of day as well as day of week (specifically, between weekdays and weekends).
+
+The data set used in this study was collected by a single, anonymous individual from 01 October to 30 November of 2012. It was downloaded from the [course website](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip) and then unzipped
+in a local directory.
+
+### Reading and Unzipping the Data
+
+We assume that the data file, activity.zip, is in the local directory.
+
+```{r}
+library(readr)
+library(dplyr)
+library(data.table)
+# Unzip and read data from file in local directory
+activityData <- read.csv(unz("activity.zip", "activity.csv"), header=TRUE,
+                 na.strings = "NA")
+# Convert date format
+activityData$date <- as.Date(activityData$date, format = "%Y-%m-%d")
+```
+
+### Data Dictionary
+
+The data set consists of three attributes:
+
+1. steps: The number of steps (by time period)
+
+2. date: The date of data collection
+
+3. interval: The time index for data collection (beginning of time period in increments of 5 minutes
+from midnight)
 
 
+### Analyzing Step Count on Raw Data
 
-## What is mean total number of steps taken per day?
+In this section, we analyze the activity data (step count) without regard to missing data. This will generate some bias that we will examine in a later section. Specifically, the summary counts by time
+period will be zero if data are missing, thereby reducing the daily step count. Consequently, the mean
+values are likely lower than if we had a complete data set.
+
+First, we find the number of steps taken per day by summing over all time periods (intervals) each day:
+
+```{r}
+# Find the total number of steps taken in a day
+stepsByDay <- activityData %>% group_by(date) %>%
+      summarise(totalSteps=sum(steps, na.rm = TRUE))
+stepsByDay <- data.table(stepsByDay)
+```
+
+The result of this compilation is shown in the histogram below:
+
+```{r}
+# Histogram of the number of steps per day
+hist(stepsByDay$totalSteps, main = "Number of Steps per Day", xlab = "Number of Steps", ylab = "Frequency",
+     breaks = c(0,2500,5000,7500,10000,12500,15000,17500,20000,22500,25000), ylim = c(0,40))
+```
+
+The relatively large frequency in the smallest bin (0-2,500 steps per day) is due to missing values in
+the data set. The median and mean number of steps per day are given by the following formulae
+
+```{r}
+# Median and mean number of steps per day (single numbers)
+medSteps <- median(stepsByDay$totalSteps)
+meanSteps <- round(mean(stepsByDay$totalSteps),2)
+```
+which produced a median of `r medSteps` and a mean of `r meanSteps`.
+
+Next, we are interested in how activity is related to time of day. We calculate the average number of
+steps per period (interval), keeping in mind that each interval represents a 5-minute period starting at
+midnight in the format hhmm. For example, the interval labeled 600 is the time slot 6:00-6:05 a.m.
+
+```{r}
+# Find the number of steps per time period across dates
+stepsByPeriod <- activityData %>% group_by(interval) %>%
+      summarise(avgSteps=mean(steps, na.rm = TRUE))
+stepsByPeriod <- data.table(stepsByPeriod)
+```
+
+The average activity pattern is displayed in the following graph:
+
+```{r}
+plot(stepsByPeriod, type = "l", xlab = "Minutes after Midnight", ylab = "Average Number of Steps",
+     main = "Activity Level by Time of Day")
+```
+
+We find the maximum average number of steps by time period with the following procedure:
+
+```{r}
+# Find the time period with the largest average number of steps
+# Of course, you cannot apply which.max to a data frame, so first,
+# stepsByPeriod has to be converted to a matrix...
+stepsByPeriodMatrix <- as.matrix(stepsByPeriod)
+maxStepPeriod <- stepsByPeriodMatrix[which.max(stepsByPeriodMatrix[,2]),1]
+```
+which shows that the activity level, on average, is highest during time period `r maxStepPeriod`.
+
+### Imputing Missing Values
+
+As mentioned previously, missing values are likely to bias the results in a negative direction (i.e.,
+underestimating the number of steps taken per day or per time period). There are several ways in which
+the missing values could be imputed. In this analysis, we are going to use the average number of minutes
+per time period to replace the missing steps data. To gauge the severity of the missing data problem,
+we identify the number of missing values.
+
+```{r}
+# First, find out how many rows have missing values
+missingRowValues <- sum(!complete.cases(activityData))
+missingStepsByDay <- activityData %>% group_by(date) %>%
+      summarise(totalSteps=sum(steps))
+missingDateValues <- sum(!complete.cases(missingStepsByDay))
+```
+There are `r missingRowValues` time periods with missing data, distributed across `r missingDateValues`
+days. Next, we insert the imputed values into the data set:
+
+```{r}
+# Use average number of steps per time period from stepsByPeriod to impute
+# the missing values by time period (regardless of day of week)
+naIdx <- which(is.na(activityData$steps))
+crIdx <- match(activityData$interval,stepsByPeriod$interval)
+actDataImputed <- activityData
+actDataImputed$steps <- as.numeric(actDataImputed$steps)
+actDataImputed[naIdx,1] <- stepsByPeriod[crIdx[naIdx],2]
+```
+From the new data frame, we can compute the revised average number of steps per day,
+
+```{r}
+# Find the total number of steps taken in a day
+stepsByDayImputed <- actDataImputed %>% group_by(date) %>%
+      summarise(totalSteps=sum(steps, na.rm = TRUE))
+stepsByDayImputed <- data.table(stepsByDayImputed)
+```
+which is displayed in a histogram below.
+
+```{r}
+# Histogram of the number of steps per day
+hist(stepsByDayImputed$totalSteps, main = "Number of Steps per Day", xlab = "Number of Steps",
+     ylab = "Frequency", ylim = c(0,40), xlim = c(0,25000),
+     breaks = c(0,2500,5000,7500,10000,12500,15000,17500,20000,22500,25000))
+```
+
+As predicted, the number of days with 0-2500 steps taken is reduced noticeably from the analysis
+in which we did not impute missing values. The median and mean number of steps per day were also
+re-computed according to:
+```{r}
+# Median and mean number of steps per day (single numbers)
+medImp <- as.numeric(median(stepsByDayImputed$totalSteps))
+meanImp <- mean(stepsByDayImputed$totalSteps)
+```
+The revised median is `r sprintf("%.2f", medImp)` steps per day, while the mean is `r sprintf("%.2f", meanImp)`
+steps per day. Incidentally, the median and mean values are the same as there are several days with the mean value
+of steps due to the `r  missingDateValues` days with imputed values.
+
+### Activity by Day of the Week
+
+We hypothesize that activity levels might differ between days of the week. In particular, we are
+interested in the difference between weekday and weekend activity levels. First, we need to split
+the data set by weekdays and weekend days. Then, we calculate the average number of steps per day
+for the two classes.
+
+```{r}
+# Define weedayDays and weekendDays
+weekdayDays <- c("Monday","Tuesday","Wednesday","Thursday","Friday")
+weekendDays <- c("Saturday","Sunday")
+
+# Classify data rows by weekday v. weekend
+idxWk <- which(weekdays(actDataImputed$date) %in% weekdayDays)
+idxWe <- which(weekdays(actDataImputed$date) %in% weekendDays)
+actDataImputed$dayOfWk <- NA
+actDataImputed$dayOfWk[idxWk] <- "weekday"
+actDataImputed$dayOfWk[idxWe] <- "weekend"
+
+stepsOnWeekdays <- actDataImputed[actDataImputed$dayOfWk == "weekday",]
+stepsOnWeekends <- actDataImputed[actDataImputed$dayOfWk == "weekend",]
+
+stepsByPeriodOnWD <- stepsOnWeekdays %>% group_by(interval) %>%
+      summarise(avgSteps=mean(steps, na.rm = TRUE))
+stepsByPeriodOnWD <- data.table(stepsByPeriodOnWD)
+
+stepsByPeriodOnWE <- stepsOnWeekends %>% group_by(interval) %>%
+      summarise(avgSteps=mean(steps, na.rm = TRUE))
+stepsByPeriodOnWE <- data.table(stepsByPeriodOnWE)
+```
+
+The difference in activity level by weekdays v. weekends is evident in the figure below.
+
+```{r, fig.height=8}
+par(mfrow = c(2, 1))
+par(mar=c(0,0,0,0))
+par(oma=c(4,4,1.5,1.5))
+par(cex.main = 0.8)
+par(mgp = c(2,0.6,0))
+plot(stepsByPeriodOnWD, type = "l", xlim = c(0,2400), ylim = c(0,250), xaxt = "n")
+title("Average Number of Steps per Time Period on Weekdays", line = -1.8)
+plot(stepsByPeriodOnWE, type = "l", xlim = c(0,2400), ylim = c(0,200))
+title("Average Number of Steps per Time Period on Weekends", line = -1.8)
+mtext("Time Period", side = 1, outer = TRUE, cex = 1.0, line = 2.2)
+mtext("Average Number of Steps", side = 2, outer = TRUE, cex = 1.0, line = 2.2)
+```
 
 
-
-## What is the average daily activity pattern?
-
-
-
-## Imputing missing values
-
-
-
-## Are there differences in activity patterns between weekdays and weekends?
+We observe that weekday peak activity is higher than that on weekends. At the
+same time, the weekend activity level is higher mid-day than on weekdays.
